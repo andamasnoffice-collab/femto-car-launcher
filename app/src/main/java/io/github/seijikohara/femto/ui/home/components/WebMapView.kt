@@ -62,13 +62,16 @@ import io.github.seijikohara.femto.data.display.GoogleMapsRendering
 import io.github.seijikohara.femto.data.display.MapBackend
 import io.github.seijikohara.femto.data.display.MapStyleSetting
 import io.github.seijikohara.femto.data.map.MapRuntimeSignals
+import io.github.seijikohara.femto.data.map.MbTilesPackage
 import io.github.seijikohara.femto.data.map.MbTilesPackageStore
 import io.github.seijikohara.femto.data.map.MbTilesPackageSelection
 import io.github.seijikohara.femto.ui.theme.FemtoIcon
 import io.github.seijikohara.femto.ui.theme.FemtoTheme
 import io.github.seijikohara.femto.ui.theme.LocalFemtoDarkTheme
 import io.github.seijikohara.femto.ui.theme.PreviewLightDark
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import okhttp3.Cache
 import okhttp3.CacheControl
 import okhttp3.OkHttpClient
@@ -170,8 +173,12 @@ internal fun WebMapView(
     }
     LaunchedEffect(mbTilesStore) { mbTilesStore.activePackageId() }
     val activeMbTilesId by MbTilesPackageSelection.activeId.collectAsState()
-    val activeMbTilesInfo = remember(mbTilesStore, activeMbTilesId) {
-        activeMbTilesId?.let(mbTilesStore::packageInfoBlocking)
+    var activeMbTilesInfo by remember { mutableStateOf<MbTilesPackage?>(null) }
+    LaunchedEffect(mbTilesStore, activeMbTilesId) {
+        activeMbTilesInfo = null
+        activeMbTilesInfo = activeMbTilesId?.let { id ->
+            withContext(Dispatchers.IO) { mbTilesStore.packageInfoBlocking(id) }
+        }
     }
     val onlineState = remember { AtomicBoolean(online) }
     SideEffect { onlineState.set(online) }
