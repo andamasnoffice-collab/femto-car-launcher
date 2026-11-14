@@ -47,6 +47,8 @@ declare global {
         // the host will push, so a cold start fetches no hosted style it is
         // about to replace.
         initialStyleUrl(): string;
+        offlineMbtilesId(): string;
+        offlineMbtilesAttribution(): string;
     }
 }
 
@@ -83,7 +85,24 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
     const tileHost = bridge?.tileHost() || UPSTREAM_TILE_HOST;
     const terrainUrl = bridge?.terrainTileJsonUrl() || "";
     const initialStyleUrl = bridge?.initialStyleUrl() || DEFAULT_STYLE_URL;
-    if (tileHost !== UPSTREAM_TILE_HOST) log(`tile host: ${tileHost}`);
+    const offlineMbtilesId = bridge?.offlineMbtilesId() || "";
+    const offlineAttribution = bridge?.offlineMbtilesAttribution() || "";
+    const offlineStyle = offlineMbtilesId
+        ? {
+              version: 8 as const,
+              sources: {
+                  offline: {
+                      type: "raster" as const,
+                      tiles: [`https://appassets.androidplatform.net/mbtiles/${offlineMbtilesId}/{z}/{x}/{y}`],
+                      tileSize: 256,
+                      attribution: offlineAttribution,
+                  },
+              },
+              layers: [{ id: "offline-raster", type: "raster" as const, source: "offline" }],
+          }
+        : null;
+    if (tileHost !== UPSTREAM_TILE_HOST && !offlineStyle) log(`tile host: ${tileHost}`);
+    if (offlineStyle) log(`offline MBTiles package active: ${offlineMbtilesId}`);
 
     // Mutable style state in one const holder (let/var are banned — see the
     // lint block in vite.config.ts and no-let.js). The follow camera's state
@@ -106,7 +125,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         const styleWatchdog = createStyleLoadWatchdog({ graceMs: LOAD_FATAL_GRACE_MS, reporter });
         const liveMap = new MapLibreMap({
             container: "map",
-            style: initialStyleUrl,
+            style: offlineStyle || initialStyleUrl,
             center: [0, 0],
             zoom: 1,
             attributionControl: false,
@@ -322,7 +341,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
             label,
             pageAttribution,
         ) => {
-            if (!url) return;
+            if (!url || offlineStyle) return;
             // A swap to another style is a fresh load for both outcome-gated
             // fatals: MapLibre never retries a style or a TileJSON that failed
             // to fetch, and without this the old style would stay on screen
@@ -353,8 +372,8 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         // theme-tracked extrusion colour), then re-apply the style so
         // transformStyle injects (or omits) the matching layers/sources.
         window.setFeatures = (buildings, terrain, buildingColor) => {
-            state.buildings = buildings;
-            state.terrain = terrain;
+            state.buildings = offlineStyle ? false : buildings;
+            state.terrain = offlineStyle ? false : terrain;
             state.buildingColor = buildingColor || "";
             applyStyleWithFade();
         };
