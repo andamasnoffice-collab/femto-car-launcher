@@ -162,6 +162,8 @@ internal fun WebMapView(
     attributionBottomInset: Dp = 0.dp,
 ) {
     val context = LocalContext.current
+    val onlineState = remember { AtomicBoolean(online) }
+    SideEffect { onlineState.set(online) }
     // Share one process-wide cache: OkHttp must not open the same disk directory twice.
     val mapResourceCache = remember(context.applicationContext) {
         MapResourceCacheHolder.get(context.applicationContext)
@@ -339,7 +341,6 @@ internal fun WebMapView(
         remember(
             rendererGeneration,
             reloadGeneration,
-            online,
             offlineMapCacheEnabled,
             mapConfig.backend,
             effectiveGoogleKey,
@@ -574,7 +575,6 @@ internal fun WebMapView(
         remember(
             rendererGeneration,
             reloadGeneration,
-            online,
             offlineMapCacheEnabled,
             mapConfig.backend,
             effectiveGoogleKey,
@@ -618,7 +618,7 @@ internal fun WebMapView(
                         assetLoader = assetLoader,
                         mapResourceCache = mapResourceCache,
                         mapResourceHosts = mapResourceHosts,
-                        online = online,
+                        onlineState = onlineState,
                         onPageLoaded = { pageReady.value = true },
                         onRendererDeath = { view, crashed ->
                             val description = if (crashed) "renderer crashed" else "renderer killed by the system"
@@ -1130,7 +1130,7 @@ internal class LiveMapWebViewClient(
     private val assetLoader: WebViewAssetLoader,
     private val mapResourceCache: MapResourceCache,
     private val mapResourceHosts: Set<String>,
-    private val online: Boolean,
+    private val onlineState: AtomicBoolean,
     private val onPageLoaded: () -> Unit,
     private val onRendererDeath: (view: WebView, crashed: Boolean) -> Unit,
 ) : WebViewClientCompat() {
@@ -1160,7 +1160,7 @@ internal class LiveMapWebViewClient(
         request: WebResourceRequest,
     ): WebResourceResponse? =
         assetLoader.shouldInterceptRequest(request.url)
-            ?: mapResourceCache.intercept(request, mapResourceHosts, online)
+            ?: mapResourceCache.intercept(request, mapResourceHosts, onlineState.get())
 
     override fun onPageFinished(
         view: WebView,
