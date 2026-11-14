@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -62,6 +63,7 @@ import io.github.seijikohara.femto.data.display.MapBackend
 import io.github.seijikohara.femto.data.display.MapStyleSetting
 import io.github.seijikohara.femto.data.map.MapRuntimeSignals
 import io.github.seijikohara.femto.data.map.MbTilesPackageStore
+import io.github.seijikohara.femto.data.map.MbTilesPackageSelection
 import io.github.seijikohara.femto.ui.theme.FemtoIcon
 import io.github.seijikohara.femto.ui.theme.FemtoTheme
 import io.github.seijikohara.femto.ui.theme.LocalFemtoDarkTheme
@@ -166,9 +168,10 @@ internal fun WebMapView(
     val mbTilesStore = remember(context.applicationContext) {
         MbTilesPackageStore(context.contentResolver, context.filesDir)
     }
-    val activeMbTilesId = remember(mbTilesStore) { mbTilesStore.activePackageId().orEmpty() }
+    LaunchedEffect(mbTilesStore) { mbTilesStore.activePackageId() }
+    val activeMbTilesId by MbTilesPackageSelection.activeId.collectAsState()
     val activeMbTilesInfo = remember(mbTilesStore, activeMbTilesId) {
-        activeMbTilesId.takeIf(String::isNotBlank)?.let(mbTilesStore::packageInfoBlocking)
+        activeMbTilesId?.let(mbTilesStore::packageInfoBlocking)
     }
     val onlineState = remember { AtomicBoolean(online) }
     SideEffect { onlineState.set(online) }
@@ -588,6 +591,8 @@ internal fun WebMapView(
             rendererGeneration,
             reloadGeneration,
             offlineMapCacheEnabled,
+            offlineMbTilesEnabled,
+            activeMbTilesId,
             mapConfig.backend,
             effectiveGoogleKey,
             effectiveGoogleMapId,
@@ -1184,7 +1189,9 @@ internal class LiveMapWebViewClient(
         request: WebResourceRequest,
     ): WebResourceResponse? {
         assetLoader.shouldInterceptRequest(request.url)?.let { return it }
-        offlineTileResponse(request.url.path)?.let { return it }
+        if (request.url.scheme == "https" && request.url.host == APPASSETS_HOST && request.method == "GET") {
+            offlineTileResponse(request.url.path)?.let { return it }
+        }
         return mapResourceCache.intercept(request, mapResourceHosts, onlineState.get())
     }
 
