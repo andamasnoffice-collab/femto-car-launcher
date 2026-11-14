@@ -16,17 +16,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
-import java.io.File
-import java.io.FilterInputStream
-import java.io.IOException
-import java.net.URI
-import java.util.concurrent.Semaphore
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
-import okhttp3.Cache
-import okhttp3.CacheControl
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,45 +27,56 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.currentStateAsState
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.currentStateAsState
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.MapPinOff
 import io.github.seijikohara.femto.BuildConfig
-import io.github.seijikohara.femto.R
 import io.github.seijikohara.femto.data.common.femtoUserAgent
 import io.github.seijikohara.femto.data.display.GoogleMapsRendering
 import io.github.seijikohara.femto.data.display.MapBackend
 import io.github.seijikohara.femto.data.display.MapStyleSetting
 import io.github.seijikohara.femto.data.map.MapRuntimeSignals
+import io.github.seijikohara.femto.R
 import io.github.seijikohara.femto.ui.theme.FemtoIcon
 import io.github.seijikohara.femto.ui.theme.FemtoTheme
 import io.github.seijikohara.femto.ui.theme.LocalFemtoDarkTheme
 import io.github.seijikohara.femto.ui.theme.PreviewLightDark
+import java.io.File
+import java.io.FilterInputStream
+import java.io.IOException
+import java.net.URI
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
+import okhttp3.Cache
+import okhttp3.CacheControl
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 /**
  * Live map in a WebView — the only path that renders a smooth, animated map
@@ -163,9 +163,9 @@ internal fun WebMapView(
     attributionBottomInset: Dp = 0.dp,
 ) {
     val context = LocalContext.current
-    // Share one persistent disk cache across WebView rebuilds and connectivity changes.
+    // Share one process-wide cache: OkHttp must not open the same disk directory twice.
     val mapResourceCache = remember(context.applicationContext) {
-        MapResourceCache(context.applicationContext)
+        MapResourceCacheHolder.get(context.applicationContext)
     }
     // The bridge object below is registered once per WebView instance and would
     // otherwise capture the first composition's lambdas forever.
@@ -599,18 +599,11 @@ internal fun WebMapView(
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
-                // Keep normal HTTP validation while online, so updated styles and
-                // tiles can refresh according to the provider's cache headers. When
-                // offline, allow Chromium's persistent disk cache to serve previously
-                // viewed map resources even after their freshness lifetime expires.
-                // This is a passive cache of resources MapLibre actually requested for
-                // the visible map: no background tile prefetch or bulk download.
-                settings.cacheMode =
-                    if (online || !offlineMapCacheEnabled) {
-                        WebSettings.LOAD_DEFAULT
-                    } else {
-                        WebSettings.LOAD_CACHE_ELSE_NETWORK
-                    }
+                // Keep Chromium's normal HTTP cache policy for every backend.
+                // OpenFreeMap's offline stale-cache reads are handled by the bounded
+                // OkHttp cache below; do not force stale cache use for Google Maps,
+                // custom hosts, or the separate Mapterhorn terrain endpoint.
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
                 // Keep rasterizing while attached but not yet visible (the Compose
                 // AndroidView attach window) so the GL surface is not evicted —
                 // surface eviction dropped the WebGL context a few seconds in on the
@@ -1034,8 +1027,8 @@ internal class MapResourceCache(context: Context) {
             val response = client.newCall(builder.build()).execute()
             responseToClose = response
             val body = response.body
-            // 504 is OkHttp's cache-only miss. Let WebView try its own persistent
-            // HTTP cache (V1) under LOAD_CACHE_ELSE_NETWORK before giving up.
+            // 504 is OkHttp's cache-only miss. Return null so WebView can still use
+            // any fresh browser-cache entry under its normal HTTP cache policy.
             if (response.code == 504 || body == null) return null
 
             val contentType = body.contentType()
@@ -1115,6 +1108,16 @@ internal class MapResourceCache(context: Context) {
                 "content-encoding",
             )
     }
+}
+
+private object MapResourceCacheHolder {
+    @Volatile
+    private var instance: MapResourceCache? = null
+
+    fun get(context: Context): MapResourceCache =
+        instance ?: synchronized(this) {
+            instance ?: MapResourceCache(context.applicationContext).also { instance = it }
+        }
 }
 
 private const val OPENFREEMAP_TILE_HOST = "tiles.openfreemap.org"
