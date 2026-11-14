@@ -304,6 +304,7 @@ internal fun WebMapView(
             googleDark,
             effectiveTileHostOverride,
             effectiveCustomStyleUrl,
+            activeMbTilesId,
         ) {
             mutableIntStateOf(0)
         }
@@ -384,6 +385,8 @@ internal fun WebMapView(
             googleDark,
             effectiveTileHostOverride,
             effectiveCustomStyleUrl,
+            offlineMbTilesEnabled,
+            activeMbTilesId,
         ) {
             mutableStateOf(false)
         }
@@ -397,6 +400,8 @@ internal fun WebMapView(
             googleDark,
             effectiveTileHostOverride,
             effectiveCustomStyleUrl,
+            offlineMbTilesEnabled,
+            activeMbTilesId,
         ) {
             mutableStateOf<String?>(null)
         }
