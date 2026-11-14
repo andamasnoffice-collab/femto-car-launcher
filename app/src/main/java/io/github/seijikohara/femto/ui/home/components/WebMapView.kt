@@ -689,6 +689,12 @@ internal fun WebMapView(
                         @JavascriptInterface
                         fun initialStyleUrl(): String = currentStyleUrl
 
+                        @JavascriptInterface
+                        fun offlineMbtilesId(): String = if (offlineMbTilesEnabled) activeMbTilesId else ""
+
+                        @JavascriptInterface
+                        fun offlineMbtilesAttribution(): String = activeMbTilesInfo?.attribution.orEmpty()
+
                         // Read synchronously by the googlemaps backend module before map initialisation
                         // to authenticate the Maps JavaScript API instance. The key comes
                         // from MapConfig (user-supplied at runtime via DisplaySettings).
