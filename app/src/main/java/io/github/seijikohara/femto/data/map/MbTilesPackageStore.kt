@@ -3,6 +3,7 @@ package io.github.seijikohara.femto.data.map
 import android.content.ContentResolver
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
+import android.os.StatFs
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -36,7 +37,23 @@ internal class MbTilesPackageStore(
         val packageFile = File(packageDirectory, "$id.mbtiles")
         try {
             contentResolver.openInputStream(source)?.use { input ->
-                FileOutputStream(stagingFile).use { output -> input.copyTo(output) }
+                FileOutputStream(stagingFile).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var totalBytes = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        totalBytes += count
+                        require(totalBytes <= MAX_PACKAGE_BYTES) {
+                            "The MBTiles package exceeds the 2 GB import limit."
+                        }
+                        require(availableBytes() >= count + MIN_FREE_SPACE_BYTES) {
+                            "There is not enough free storage for this offline map."
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                    output.fd.sync()
+                }
             } ?: error("The selected file could not be opened.")
             val metadata = readAndValidate(stagingFile, suggestedName)
             check(stagingFile.renameTo(packageFile)) { "The offline map could not be saved." }
@@ -80,6 +97,11 @@ internal class MbTilesPackageStore(
         null,
         SQLiteDatabase.OPEN_READONLY,
     ).use { database ->
+        val integrity = database.rawQuery("PRAGMA quick_check(1)", null).use { cursor ->
+            cursor.moveToFirst() && cursor.getString(0) == "ok"
+        }
+        require(integrity) { "The MBTiles database is damaged and cannot be imported." }
+
         val tables = database.rawQuery(
             "SELECT name FROM sqlite_master WHERE type = 'table'",
             null,
@@ -123,7 +145,13 @@ internal class MbTilesPackageStore(
 
         MbTilesPackage(
             id = "",
-            name = values["name"]?.takeIf(String::isNotBlank) ?: fallbackName,
+            name = values["name"]?.takeIf(String::isNotBlank) ?: fallbackName
+                .substringAfterLast('/')
+                .removeSuffix(".$FILE_EXTENSION")
+                .filterNot(Char::isISOControl)
+                .trim()
+                .take(MAX_PACKAGE_NAME_LENGTH)
+                .ifBlank { "Offline map" },
             fileName = file.name,
             format = format,
             minZoom = values["minzoom"]?.toIntOrNull(),
@@ -145,9 +173,14 @@ internal class MbTilesPackageStore(
         }
     }
 
+    private fun availableBytes(): Long = StatFs(packageDirectory.absolutePath).availableBytes
+
     private companion object {
         const val PACKAGE_DIRECTORY = "offline-maps"
         const val FILE_EXTENSION = "mbtiles"
+        const val MAX_PACKAGE_BYTES = 2L * 1024 * 1024 * 1024
+        const val MIN_FREE_SPACE_BYTES = 64L * 1024 * 1024
+        const val MAX_PACKAGE_NAME_LENGTH = 80
         val SUPPORTED_FORMATS = setOf("png", "jpg", "jpeg", "webp", "pbf", "mvt")
     }
 }
