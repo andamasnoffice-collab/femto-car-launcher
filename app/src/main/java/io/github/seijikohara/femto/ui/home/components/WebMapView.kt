@@ -244,6 +244,13 @@ internal fun WebMapView(
     // re-allocated on every recomposition (one per location fix).
     val tileHosts =
         remember(effectiveTileHostOverride) { mapTileHosts(effectiveTileHostOverride, BuildConfig.MAP_TILE_HOST) }
+    // Only OpenFreeMap's public tile host has an explicit offline-use allowance.
+    // Custom tile hosts and the Google Maps backend keep their normal WebView policy.
+    val activeTileHost = tileHostAt(tileHosts, tileHostRotation.intValue)
+    val offlineMapCacheEnabled =
+        mapConfig.backend == MapBackend.OSM &&
+            runCatching { URI(activeTileHost).host == OPENFREEMAP_TILE_HOST }.getOrDefault(false)
+    val mapResourceHosts = if (offlineMapCacheEnabled) setOf(OPENFREEMAP_TILE_HOST) else emptySet()
 
     // Renderer-death containment state (see the KDoc): bumping the generation
     // rebuilds the WebView after the renderer process dies; once deaths repeat
@@ -333,6 +340,7 @@ internal fun WebMapView(
             rendererGeneration,
             reloadGeneration,
             online,
+            offlineMapCacheEnabled,
             mapConfig.backend,
             effectiveGoogleKey,
             effectiveGoogleMapId,
@@ -595,7 +603,11 @@ internal fun WebMapView(
                 // This is a passive cache of resources MapLibre actually requested for
                 // the visible map: no background tile prefetch or bulk download.
                 settings.cacheMode =
-                    if (online) WebSettings.LOAD_DEFAULT else WebSettings.LOAD_CACHE_ELSE_NETWORK
+                    if (online || !offlineMapCacheEnabled) {
+                        WebSettings.LOAD_DEFAULT
+                    } else {
+                        WebSettings.LOAD_CACHE_ELSE_NETWORK
+                    }
                 // Keep rasterizing while attached but not yet visible (the Compose
                 // AndroidView attach window) so the GL surface is not evicted —
                 // surface eviction dropped the WebGL context a few seconds in on the
@@ -610,7 +622,7 @@ internal fun WebMapView(
                         context = context,
                         assetLoader = assetLoader,
                         mapResourceCache = mapResourceCache,
-                        mapResourceHosts = mapResourceHosts(tileHosts, BuildConfig.MAP_TERRAIN_TILEJSON_URL),
+                        mapResourceHosts = mapResourceHosts,
                         online = online,
                         onPageLoaded = { pageReady.value = true },
                         onRendererDeath = { view, crashed ->
@@ -1092,12 +1104,7 @@ internal class MapResourceCache(context: Context) {
     }
 }
 
-internal fun mapResourceHosts(tileHosts: List<String>, terrainTileJsonUrl: String): Set<String> =
-    buildSet {
-        (tileHosts + terrainTileJsonUrl).forEach { value ->
-            runCatching { URI(value).host?.lowercase() }.getOrNull()?.let(::add)
-        }
-    }
+private const val OPENFREEMAP_TILE_HOST = "tiles.openfreemap.org"
 
 // The live map page's WebView client. [onPageLoaded] runs once the page script
 // has run (module scripts execute before the load event, so the bridge
