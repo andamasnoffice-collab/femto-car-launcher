@@ -52,12 +52,18 @@ internal fun SettingsRoute(
     // result — on denial the visualization degrades to flat (the
     // READ_CALENDAR / BLUETOOTH_CONNECT precedent: setting and grant stay
     // decoupled).
+    val offlineMapPicker =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri -> uri?.let { viewModel.onAction(SettingsAction.ImportOfflineMapPackage(it)) } }
     val recordAudioLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
         ) { viewModel.onAction(SettingsAction.SetMusicSpectrum(true)) }
     val viewModelAction: (SettingsAction) -> Unit = { action ->
         when {
+            action == SettingsAction.PickOfflineMapPackage -> offlineMapPicker.launch(arrayOf("*/*"))
+
             action is SettingsAction.SetMusicSpectrum && action.value && !context.hasRecordAudioPermission() -> {
                 recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }

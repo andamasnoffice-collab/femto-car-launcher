@@ -169,6 +169,64 @@ internal fun MapSection(
                 ) {
                     TrailingIcon(Lucide.ChevronRight)
                 }
+                SettingsSubheader(stringResource(R.string.settings_offline_maps_title))
+                ActionRow(
+                    title = stringResource(R.string.settings_offline_maps_import),
+                    summary = stringResource(R.string.settings_offline_maps_import_hint),
+                    onClick = { onAction(SettingsAction.PickOfflineMapPackage) },
+                )
+                uiState.offlineMapPackages.forEach { packageInfo ->
+                    ActionRow(
+                        title = packageInfo.name,
+                        summary = stringResource(
+                            R.string.settings_offline_maps_package_summary,
+                            packageInfo.format.uppercase(),
+                            packageInfo.tileCount,
+                            packageInfo.fileSizeBytes / (1024 * 1024),
+                        ),
+                        onClick = {
+                            onAction(
+                                SettingsAction.ActivateOfflineMapPackage(
+                                    if (uiState.activeOfflineMapId == packageInfo.id) null else packageInfo.id,
+                                ),
+                            )
+                        },
+                    )
+                    TextButton(
+                        onClick = { onAction(SettingsAction.DeleteOfflineMapPackage(packageInfo.id)) },
+                        modifier = Modifier.padding(start = 20.dp),
+                    ) {
+                        Text(stringResource(R.string.settings_offline_maps_delete))
+                    }
+                }
+                if (uiState.offlineMapBusy) {
+                    Text(
+                        text = stringResource(R.string.settings_offline_maps_working),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    )
+                }
+                uiState.offlineMapError?.let { error ->
+                    Text(
+                        text = stringResource(R.string.settings_offline_maps_error, error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    )
+                }
+                Text(
+                    text = stringResource(
+                        if (uiState.activeOfflineMapId == null) {
+                            R.string.settings_offline_maps_inactive
+                        } else {
+                            R.string.settings_offline_maps_active
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
             }
         }
         SettingsSubheader(stringResource(R.string.settings_subheader_map_camera))
