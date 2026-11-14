@@ -47,8 +47,8 @@ declare global {
         // the host will push, so a cold start fetches no hosted style it is
         // about to replace.
         initialStyleUrl(): string;
-        offlineMbtilesId(): string;
-        offlineMbtilesAttribution(): string;
+        offlineMbtilesId?(): string;
+        offlineMbtilesAttribution?(): string;
     }
 }
 
@@ -85,8 +85,8 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
     const tileHost = bridge?.tileHost() || UPSTREAM_TILE_HOST;
     const terrainUrl = bridge?.terrainTileJsonUrl() || "";
     const initialStyleUrl = bridge?.initialStyleUrl() || DEFAULT_STYLE_URL;
-    const offlineMbtilesId = bridge?.offlineMbtilesId() || "";
-    const offlineAttribution = bridge?.offlineMbtilesAttribution() || "";
+    const offlineMbtilesId = bridge?.offlineMbtilesId?.() || "";
+    const offlineAttribution = bridge?.offlineMbtilesAttribution?.() || "";
     const offlineStyle = offlineMbtilesId
         ? {
               version: 8 as const,
