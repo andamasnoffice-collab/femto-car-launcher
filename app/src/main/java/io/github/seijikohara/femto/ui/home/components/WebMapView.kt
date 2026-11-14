@@ -67,7 +67,6 @@ import io.github.seijikohara.femto.ui.theme.LocalFemtoDarkTheme
 import io.github.seijikohara.femto.ui.theme.PreviewLightDark
 import java.io.File
 import java.io.FilterInputStream
-import java.io.IOException
 import java.net.URI
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
