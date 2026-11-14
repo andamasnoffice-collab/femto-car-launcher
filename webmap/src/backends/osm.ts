@@ -328,6 +328,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
                 attribution.control = null;
             }
         }
+        setPageAttribution(!!offlineMbtilesId);
 
         window.setStyleUrl = (
             url,
