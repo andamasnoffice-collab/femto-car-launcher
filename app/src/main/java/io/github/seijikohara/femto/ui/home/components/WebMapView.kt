@@ -22,6 +22,7 @@ import java.io.IOException
 import java.net.URI
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Cache
 import okhttp3.CacheControl
 import okhttp3.OkHttpClient
@@ -1049,16 +1050,26 @@ internal class MapResourceCache(context: Context) {
                     .associateWith { name -> response.headers.values(name).joinToString(", ") }
             val responseStream =
                 object : FilterInputStream(body.byteStream()) {
-                    private var closed = false
+                    private val released = AtomicBoolean(false)
+
+                    private fun releasePermit() {
+                        if (released.compareAndSet(false, true)) {
+                            response.close()
+                            permits.release()
+                        }
+                    }
+
+                    override fun read(): Int =
+                        super.read().also { if (it == -1) releasePermit() }
+
+                    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                        super.read(buffer, offset, length).also { if (it == -1) releasePermit() }
 
                     override fun close() {
-                        if (closed) return
-                        closed = true
                         try {
                             super.close()
                         } finally {
-                            response.close()
-                            permits.release()
+                            releasePermit()
                         }
                     }
                 }
