@@ -978,18 +978,18 @@ internal fun WebMapView(
 
 
 /**
- * Bounded persistent HTTP cache for map resources requested by the visible map.
- * No area enumeration or prefetching is performed. HTTP cache headers are
- * honoured online; cache-only reads are used offline so stale viewed resources
- * can still render. The 50 MB cache and four in-flight requests match the
- * public OpenFreeMap offline-download limits.
+ * Bounded on-device HTTP cache for map resources requested by the visible map.
+ * The cache lives in filesDir rather than cacheDir so Android does not treat it
+ * as disposable app cache. No area enumeration or prefetching is performed.
+ * HTTP cache headers are honoured online; cache-only reads are used offline so
+ * previously viewed resources can still render.
  */
 internal class MapResourceCache(context: Context) {
     private val permits = Semaphore(MAX_PARALLEL_REQUESTS)
     private val client =
         OkHttpClient
             .Builder()
-            .cache(Cache(File(context.cacheDir, CACHE_DIRECTORY), MAX_CACHE_BYTES))
+            .cache(Cache(File(context.filesDir, CACHE_DIRECTORY), MAX_CACHE_BYTES))
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
@@ -1000,7 +1000,8 @@ internal class MapResourceCache(context: Context) {
         online: Boolean,
     ): WebResourceResponse? {
         if (request.method != "GET" || request.url.scheme != "https") return null
-        if (request.url.host.lowercase() !in allowedHosts) return null
+        val host = request.url.host?.lowercase() ?: return null
+        if (host !in allowedHosts) return null
         try {
             permits.acquire()
         } catch (_: InterruptedException) {
