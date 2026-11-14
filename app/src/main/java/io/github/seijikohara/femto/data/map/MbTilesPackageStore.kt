@@ -8,6 +8,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 
 /**
@@ -92,10 +94,13 @@ internal class MbTilesPackageStore(
     }
 
     /** The active raster package is stored as a tiny private marker file. */
-    fun activePackageId(): String? =
-        runCatching { File(packageDirectory, ACTIVE_FILE).readText().trim() }
+    fun activePackageId(): String? {
+        val id = runCatching { File(packageDirectory, ACTIVE_FILE).readText().trim() }
             .getOrNull()
-            ?.takeIf { id -> runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false) }
+            ?.takeIf { value -> runCatching { UUID.fromString(value).toString() == value }.getOrDefault(false) }
+        MbTilesPackageSelection.update(id)
+        return id
+    }
 
     fun packageInfoBlocking(id: String): MbTilesPackage? {
         val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull() ?: return null
@@ -107,6 +112,7 @@ internal class MbTilesPackageStore(
     suspend fun setActivePackage(id: String?): Boolean = withContext(Dispatchers.IO) {
         if (id == null) {
             File(packageDirectory, ACTIVE_FILE).delete()
+            MbTilesPackageSelection.update(null)
             return@withContext true
         }
         val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull()
@@ -120,6 +126,7 @@ internal class MbTilesPackageStore(
         val staging = File(packageDirectory, ".$ACTIVE_FILE.tmp")
         staging.writeText(safeId)
         check(staging.renameTo(File(packageDirectory, ACTIVE_FILE))) { "Could not activate offline map." }
+        MbTilesPackageSelection.update(safeId)
         true
     }
 
@@ -298,3 +305,14 @@ internal data class MbTilesTile(
     val bytes: ByteArray,
     val contentType: String,
 )
+
+
+/** Process-wide selection signal shared by Settings and the live map surface. */
+internal object MbTilesPackageSelection {
+    private val mutableActiveId = MutableStateFlow<String?>(null)
+    val activeId: StateFlow<String?> = mutableActiveId
+
+    fun update(id: String?) {
+        mutableActiveId.value = id
+    }
+}
