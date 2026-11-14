@@ -93,12 +93,20 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
               sources: {
                   offline: {
                       type: "raster" as const,
-                      tiles: [`https://appassets.androidplatform.net/mbtiles/${offlineMbtilesId}/{z}/{x}/{y}`],
+                      tiles: [
+                          `https://appassets.androidplatform.net/mbtiles/${offlineMbtilesId}/{z}/{x}/{y}`,
+                      ],
                       tileSize: 256,
                       attribution: offlineAttribution,
                   },
               },
-              layers: [{ id: "offline-raster", type: "raster" as const, source: "offline" }],
+              layers: [
+                  {
+                      id: "offline-raster",
+                      type: "raster" as const,
+                      source: "offline",
+                  },
+              ],
           }
         : null;
     if (tileHost !== UPSTREAM_TILE_HOST && !offlineStyle) log(`tile host: ${tileHost}`);
