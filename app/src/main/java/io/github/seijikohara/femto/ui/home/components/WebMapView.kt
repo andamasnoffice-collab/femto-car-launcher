@@ -65,17 +65,17 @@ import io.github.seijikohara.femto.ui.theme.FemtoIcon
 import io.github.seijikohara.femto.ui.theme.FemtoTheme
 import io.github.seijikohara.femto.ui.theme.LocalFemtoDarkTheme
 import io.github.seijikohara.femto.ui.theme.PreviewLightDark
+import kotlinx.coroutines.delay
+import okhttp3.Cache
+import okhttp3.CacheControl
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.io.FilterInputStream
 import java.net.URI
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.delay
-import okhttp3.Cache
-import okhttp3.CacheControl
-import okhttp3.OkHttpClient
-import okhttp3.Request
 
 /**
  * Live map in a WebView — the only path that renders a smooth, animated map
@@ -976,7 +976,6 @@ internal fun WebMapView(
     }
 }
 
-
 /**
  * Bounded on-device HTTP cache for map resources requested by the visible map.
  * The cache lives in filesDir rather than cacheDir so Android does not treat it
@@ -984,7 +983,9 @@ internal fun WebMapView(
  * HTTP cache headers are honoured online; cache-only reads are used offline so
  * previously viewed resources can still render.
  */
-internal class MapResourceCache(context: Context) {
+internal class MapResourceCache(
+    context: Context,
+) {
     private val permits = Semaphore(MAX_PARALLEL_REQUESTS)
     private val client =
         OkHttpClient
