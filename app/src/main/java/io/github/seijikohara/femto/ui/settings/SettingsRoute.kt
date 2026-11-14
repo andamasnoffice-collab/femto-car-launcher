@@ -62,7 +62,9 @@ internal fun SettingsRoute(
         ) { viewModel.onAction(SettingsAction.SetMusicSpectrum(true)) }
     val viewModelAction: (SettingsAction) -> Unit = { action ->
         when {
-            action == SettingsAction.PickOfflineMapPackage -> offlineMapPicker.launch(arrayOf("*/*"))
+            action == SettingsAction.PickOfflineMapPackage -> {
+                offlineMapPicker.launch(arrayOf("*/*"))
+            }
 
             action is SettingsAction.SetMusicSpectrum && action.value && !context.hasRecordAudioPermission() -> {
                 recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)

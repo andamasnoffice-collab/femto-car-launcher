@@ -222,11 +222,17 @@ internal sealed interface VideoFileSummary {
 internal sealed interface SettingsAction {
     data object PickOfflineMapPackage : SettingsAction
 
-    data class ImportOfflineMapPackage(val uri: Uri) : SettingsAction
+    data class ImportOfflineMapPackage(
+        val uri: Uri,
+    ) : SettingsAction
 
-    data class ActivateOfflineMapPackage(val id: String?) : SettingsAction
+    data class ActivateOfflineMapPackage(
+        val id: String?,
+    ) : SettingsAction
 
-    data class DeleteOfflineMapPackage(val id: String) : SettingsAction
+    data class DeleteOfflineMapPackage(
+        val id: String,
+    ) : SettingsAction
 
     data object RefreshOfflineMapPackages : SettingsAction
 

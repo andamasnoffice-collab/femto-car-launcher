@@ -25,8 +25,8 @@ import io.github.seijikohara.femto.data.location.LocationGraph
 import io.github.seijikohara.femto.data.location.LocationPreferences
 import io.github.seijikohara.femto.data.location.LocationSettingsStore
 import io.github.seijikohara.femto.data.location.VehicleMotion
-import io.github.seijikohara.femto.data.map.MbTilesPackageStore
 import io.github.seijikohara.femto.data.location.currentOrUnknown
+import io.github.seijikohara.femto.data.map.MbTilesPackageStore
 import io.github.seijikohara.femto.data.update.UpdatePreferences
 import io.github.seijikohara.femto.data.update.UpdateRepository
 import io.github.seijikohara.femto.data.update.UpdateSettingsStore
@@ -155,10 +155,11 @@ internal class SettingsViewModel(
             offlineMapUi.value = offlineMapUi.value.copy(busy = true, error = null)
             runCatching { store.listPackages() }
                 .onSuccess { packages ->
-                    offlineMapUi.value = SettingsOfflineMapUiState(
-                        packages = packages,
-                        activeId = store.activePackageId(),
-                    )
+                    offlineMapUi.value =
+                        SettingsOfflineMapUiState(
+                            packages = packages,
+                            activeId = store.activePackageId(),
+                        )
                 }
                 .onFailure { error ->
                     offlineMapUi.value = offlineMapUi.value.copy(busy = false, error = error.message)

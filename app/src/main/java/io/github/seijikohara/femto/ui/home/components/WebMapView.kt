@@ -1231,7 +1231,6 @@ internal class LiveMapWebViewClient(
             emptyMap(),
             ByteArray(0).inputStream(),
         )
-    }
 
     override fun onPageFinished(
         view: WebView,
