@@ -86,53 +86,85 @@ internal class MbTilesPackageStore(
     suspend fun deletePackage(id: String): Boolean = withContext(Dispatchers.IO) {
         val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull()
             ?: return@withContext false
-        File(packageDirectory, "$safeId.$FILE_EXTENSION").delete()
+        val deleted = File(packageDirectory, "$safeId.$FILE_EXTENSION").delete()
+        if (deleted && activePackageId() == safeId) setActivePackage(null)
+        deleted
+    }
+
+    /** The active raster package is stored as a tiny private marker file. */
+    fun activePackageId(): String? =
+        runCatching { File(packageDirectory, ACTIVE_FILE).readText().trim() }
+            .getOrNull()
+            ?.takeIf { id -> runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false) }
+
+    suspend fun setActivePackage(id: String?): Boolean = withContext(Dispatchers.IO) {
+        if (id == null) {
+            File(packageDirectory, ACTIVE_FILE).delete()
+            return@withContext true
+        }
+        val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull()
+            ?: return@withContext false
+        val packageFile = File(packageDirectory, "$safeId.$FILE_EXTENSION")
+        if (!packageFile.isFile) return@withContext false
+        val metadata = runCatching { readAndValidate(packageFile, packageFile.nameWithoutExtension) }.getOrNull()
+            ?: return@withContext false
+        if (metadata.format !in RASTER_FORMATS) return@withContext false
+        packageDirectory.mkdirs()
+        val staging = File(packageDirectory, ".$ACTIVE_FILE.tmp")
+        staging.writeText(safeId)
+        check(staging.renameTo(File(packageDirectory, ACTIVE_FILE))) { "Could not activate offline map." }
+        true
     }
 
     /**
-     * Reads one tile using MapLibre's XYZ coordinates. Standard MBTiles
-     * packages store rows in TMS order, so the Y coordinate is flipped.
-     * A database handle is scoped to one request: WebView tile requests may
-     * run concurrently and no SQLite connection is shared across threads.
+     * Synchronous tile read for WebViewClient.shouldInterceptRequest, which is
+     * already called on Chromium's resource thread. Every request owns a
+     * read-only SQLite handle; no database connection is shared across threads.
      */
+    fun readTileBlocking(
+        id: String,
+        zoom: Int,
+        x: Int,
+        y: Int,
+    ): MbTilesTile? {
+        val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull() ?: return null
+        if (zoom !in 0..30) return null
+        val tileCountAtZoom = 1L shl zoom
+        if (x < 0 || x.toLong() >= tileCountAtZoom || y < 0 || y.toLong() >= tileCountAtZoom) return null
+        val file = File(packageDirectory, "$safeId.$FILE_EXTENSION")
+        if (!file.isFile) return null
+        return runCatching {
+            SQLiteDatabase.openDatabase(
+                file.absolutePath,
+                null,
+                SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS,
+            ).use { database ->
+                val scheme = database.rawQuery("SELECT value FROM metadata WHERE name = 'scheme'", null).use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0)?.lowercase() else null
+                }
+                val row = if (scheme == "xyz") y else tileCountAtZoom.toInt() - 1 - y
+                database.rawQuery(
+                    "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ? LIMIT 1",
+                    arrayOf(zoom.toString(), x.toString(), row.toString()),
+                ).use { cursor ->
+                    if (!cursor.moveToFirst() || cursor.isNull(0)) return@use null
+                    val bytes = cursor.getBlob(0)
+                    if (bytes.isEmpty()) return@use null
+                    val format = database.rawQuery("SELECT value FROM metadata WHERE name = 'format'", null).use { meta ->
+                        if (meta.moveToFirst()) meta.getString(0)?.lowercase() else null
+                    }
+                    MbTilesTile(bytes, format?.let(::tileMimeType) ?: "application/octet-stream")
+                }
+            }
+        }.getOrNull()
+    }
+
     suspend fun readTile(
         id: String,
         zoom: Int,
         x: Int,
         y: Int,
-    ): MbTilesTile? = withContext(Dispatchers.IO) {
-        val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull()
-            ?: return@withContext null
-        if (zoom !in 0..30) return@withContext null
-        val tileCountAtZoom = 1L shl zoom
-        if (x < 0 || x.toLong() >= tileCountAtZoom || y < 0 || y.toLong() >= tileCountAtZoom) {
-            return@withContext null
-        }
-        val file = File(packageDirectory, "$safeId.$FILE_EXTENSION")
-        if (!file.isFile) return@withContext null
-        SQLiteDatabase.openDatabase(
-            file.absolutePath,
-            null,
-            SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS,
-        ).use { database ->
-            val metadata = database.rawQuery("SELECT value FROM metadata WHERE name = 'scheme'", null).use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0)?.lowercase() else null
-            }
-            val row = if (metadata == "xyz") y else tileCountAtZoom.toInt() - 1 - y
-            database.rawQuery(
-                "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ? LIMIT 1",
-                arrayOf(zoom.toString(), x.toString(), row.toString()),
-            ).use { cursor ->
-                if (!cursor.moveToFirst() || cursor.isNull(0)) return@withContext null
-                val bytes = cursor.getBlob(0)
-                if (bytes.isEmpty()) return@withContext null
-                val format = database.rawQuery("SELECT value FROM metadata WHERE name = 'format'", null).use { meta ->
-                    if (meta.moveToFirst()) meta.getString(0)?.lowercase() else null
-                }
-                MbTilesTile(bytes, format?.let(::tileMimeType) ?: "application/octet-stream")
-            }
-        }
-    }
+    ): MbTilesTile? = withContext(Dispatchers.IO) { readTileBlocking(id, zoom, x, y) }
 
     private fun tileMimeType(format: String): String = when (format) {
         "png" -> "image/png"
@@ -231,10 +263,12 @@ internal class MbTilesPackageStore(
     private companion object {
         const val PACKAGE_DIRECTORY = "offline-maps"
         const val FILE_EXTENSION = "mbtiles"
+        const val ACTIVE_FILE = ".active-package"
         const val MAX_PACKAGE_BYTES = 2L * 1024 * 1024 * 1024
         const val MIN_FREE_SPACE_BYTES = 64L * 1024 * 1024
         const val MAX_PACKAGE_NAME_LENGTH = 80
         val SUPPORTED_FORMATS = setOf("png", "jpg", "jpeg", "webp", "pbf", "mvt")
+        val RASTER_FORMATS = setOf("png", "jpg", "jpeg", "webp")
     }
 }
 
