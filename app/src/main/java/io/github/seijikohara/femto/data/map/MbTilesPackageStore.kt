@@ -97,6 +97,13 @@ internal class MbTilesPackageStore(
             .getOrNull()
             ?.takeIf { id -> runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false) }
 
+    fun packageInfoBlocking(id: String): MbTilesPackage? {
+        val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull() ?: return null
+        val file = File(packageDirectory, "$safeId.$FILE_EXTENSION")
+        return runCatching { readAndValidate(file, file.nameWithoutExtension).copy(id = safeId, fileName = file.name) }
+            .getOrNull()
+    }
+
     suspend fun setActivePackage(id: String?): Boolean = withContext(Dispatchers.IO) {
         if (id == null) {
             File(packageDirectory, ACTIVE_FILE).delete()
