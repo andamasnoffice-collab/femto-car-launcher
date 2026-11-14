@@ -320,20 +320,20 @@ internal class SettingsViewModel(
 
     // Folded in here rather than into the store combine above, which already holds
     // kotlinx's five-flow typed overload.
-    val uiState: StateFlow<SettingsUiState> =
+    private val baseUiState: Flow<SettingsUiState> =
         combine(
             storeState,
             trackExportState,
             dockStatusVisible,
             updates,
             video,
-            offlineMapUi,
-        ) { state, export, statusVisible, update, videoRows, offlineMaps ->
+        ) { state, export, statusVisible, update, videoRows ->
+            state.copy(trackExport = export, dockStatusVisible = statusVisible, updates = update, video = videoRows)
+        }
+
+    val uiState: StateFlow<SettingsUiState> =
+        combine(baseUiState, offlineMapUi) { state, offlineMaps ->
             state.copy(
-                trackExport = export,
-                dockStatusVisible = statusVisible,
-                updates = update,
-                video = videoRows,
                 offlineMapPackages = offlineMaps.packages,
                 activeOfflineMapId = offlineMaps.activeId,
                 offlineMapBusy = offlineMaps.busy,
