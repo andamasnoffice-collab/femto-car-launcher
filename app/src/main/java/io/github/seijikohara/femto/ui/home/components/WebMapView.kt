@@ -14,6 +14,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
@@ -317,6 +318,7 @@ internal fun WebMapView(
         remember(
             rendererGeneration,
             reloadGeneration,
+            online,
             mapConfig.backend,
             effectiveGoogleKey,
             effectiveGoogleMapId,
@@ -572,6 +574,14 @@ internal fun WebMapView(
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                // Keep normal HTTP validation while online, so updated styles and
+                // tiles can refresh according to the provider's cache headers. When
+                // offline, allow Chromium's persistent disk cache to serve previously
+                // viewed map resources even after their freshness lifetime expires.
+                // This is a passive cache of resources MapLibre actually requested for
+                // the visible map: no background tile prefetch or bulk download.
+                settings.cacheMode =
+                    if (online) WebSettings.LOAD_DEFAULT else WebSettings.LOAD_CACHE_ELSE_NETWORK
                 // Keep rasterizing while attached but not yet visible (the Compose
                 // AndroidView attach window) so the GL surface is not evicted —
                 // surface eviction dropped the WebGL context a few seconds in on the
