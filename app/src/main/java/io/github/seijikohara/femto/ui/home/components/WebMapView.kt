@@ -61,6 +61,7 @@ import io.github.seijikohara.femto.data.display.GoogleMapsRendering
 import io.github.seijikohara.femto.data.display.MapBackend
 import io.github.seijikohara.femto.data.display.MapStyleSetting
 import io.github.seijikohara.femto.data.map.MapRuntimeSignals
+import io.github.seijikohara.femto.data.map.MbTilesPackageStore
 import io.github.seijikohara.femto.ui.theme.FemtoIcon
 import io.github.seijikohara.femto.ui.theme.FemtoTheme
 import io.github.seijikohara.femto.ui.theme.LocalFemtoDarkTheme
@@ -162,6 +163,13 @@ internal fun WebMapView(
     attributionBottomInset: Dp = 0.dp,
 ) {
     val context = LocalContext.current
+    val mbTilesStore = remember(context.applicationContext) {
+        MbTilesPackageStore(context.contentResolver, context.filesDir)
+    }
+    val activeMbTilesId = remember(mbTilesStore) { mbTilesStore.activePackageId().orEmpty() }
+    val activeMbTilesInfo = remember(mbTilesStore, activeMbTilesId) {
+        activeMbTilesId.takeIf(String::isNotBlank)?.let(mbTilesStore::packageInfoBlocking)
+    }
     val onlineState = remember { AtomicBoolean(online) }
     SideEffect { onlineState.set(online) }
     // Share one process-wide cache: OkHttp must not open the same disk directory twice.
@@ -312,8 +320,10 @@ internal fun WebMapView(
     // Only OpenFreeMap's public tile host has an explicit offline-use allowance.
     // Custom tile hosts and the Google Maps backend keep their normal WebView policy.
     val activeTileHost = tileHostAt(tileHosts, tileHostRotation.intValue)
+    val offlineMbTilesEnabled =
+        mapConfig.backend == MapBackend.OSM && activeMbTilesInfo?.format in setOf("png", "jpg", "jpeg", "webp")
     val offlineMapCacheEnabled =
-        mapConfig.backend == MapBackend.OSM &&
+        !offlineMbTilesEnabled && mapConfig.backend == MapBackend.OSM &&
             runCatching { URI(activeTileHost).host == OPENFREEMAP_TILE_HOST }.getOrDefault(false)
     val mapResourceHosts = if (offlineMapCacheEnabled) setOf(OPENFREEMAP_TILE_HOST) else emptySet()
 
@@ -342,6 +352,8 @@ internal fun WebMapView(
             rendererGeneration,
             reloadGeneration,
             offlineMapCacheEnabled,
+            offlineMbTilesEnabled,
+            activeMbTilesId,
             mapConfig.backend,
             effectiveGoogleKey,
             effectiveGoogleMapId,
@@ -618,6 +630,7 @@ internal fun WebMapView(
                         assetLoader = assetLoader,
                         mapResourceCache = mapResourceCache,
                         mapResourceHosts = mapResourceHosts,
+                        mbTilesStore = mbTilesStore,
                         onlineState = onlineState,
                         onPageLoaded = { pageReady.value = true },
                         onRendererDeath = { view, crashed ->
@@ -1134,6 +1147,7 @@ internal class LiveMapWebViewClient(
     private val assetLoader: WebViewAssetLoader,
     private val mapResourceCache: MapResourceCache,
     private val mapResourceHosts: Set<String>,
+    private val mbTilesStore: MbTilesPackageStore,
     private val onlineState: AtomicBoolean,
     private val onPageLoaded: () -> Unit,
     private val onRendererDeath: (view: WebView, crashed: Boolean) -> Unit,
@@ -1162,9 +1176,23 @@ internal class LiveMapWebViewClient(
     override fun shouldInterceptRequest(
         view: WebView,
         request: WebResourceRequest,
-    ): WebResourceResponse? =
-        assetLoader.shouldInterceptRequest(request.url)
-            ?: mapResourceCache.intercept(request, mapResourceHosts, onlineState.get())
+    ): WebResourceResponse? {
+        assetLoader.shouldInterceptRequest(request.url)?.let { return it }
+        offlineTileResponse(request.url.path)?.let { return it }
+        return mapResourceCache.intercept(request, mapResourceHosts, onlineState.get())
+    }
+
+    private fun offlineTileResponse(path: String?): WebResourceResponse? {
+        val parts = path.orEmpty().split('/').filter(String::isNotEmpty)
+        if (parts.size != 5 || parts[0] != "mbtiles") return null
+        val zoom = parts[2].toIntOrNull() ?: return null
+        val x = parts[3].toIntOrNull() ?: return null
+        val y = parts[4].substringBefore('.').toIntOrNull() ?: return null
+        val tile = mbTilesStore.readTileBlocking(parts[1], zoom, x, y) ?: return null
+        return WebResourceResponse(tile.contentType, null, tile.bytes.inputStream()).apply {
+            responseHeaders = mapOf("Cache-Control" to "public, max-age=31536000, immutable")
+        }
+    }
 
     override fun onPageFinished(
         view: WebView,
