@@ -636,6 +636,7 @@ internal fun WebMapView(
                         mapResourceCache = mapResourceCache,
                         mapResourceHosts = mapResourceHosts,
                         mbTilesStore = mbTilesStore,
+                        activeMbTilesId = activeMbTilesId,
                         onlineState = onlineState,
                         onPageLoaded = { pageReady.value = true },
                         onRendererDeath = { view, crashed ->
@@ -1159,6 +1160,7 @@ internal class LiveMapWebViewClient(
     private val mapResourceCache: MapResourceCache,
     private val mapResourceHosts: Set<String>,
     private val mbTilesStore: MbTilesPackageStore,
+    private val activeMbTilesId: String?,
     private val onlineState: AtomicBoolean,
     private val onPageLoaded: () -> Unit,
     private val onRendererDeath: (view: WebView, crashed: Boolean) -> Unit,
@@ -1201,10 +1203,22 @@ internal class LiveMapWebViewClient(
         val zoom = parts[2].toIntOrNull() ?: return null
         val x = parts[3].toIntOrNull() ?: return null
         val y = parts[4].substringBefore('.').toIntOrNull() ?: return null
-        val tile = mbTilesStore.readTileBlocking(parts[1], zoom, x, y) ?: return null
+        if (parts[1] != activeMbTilesId) return notFoundTileResponse()
+        val tile = mbTilesStore.readTileBlocking(parts[1], zoom, x, y) ?: return notFoundTileResponse()
         return WebResourceResponse(tile.contentType, null, tile.bytes.inputStream()).apply {
             responseHeaders = mapOf("Cache-Control" to "public, max-age=31536000, immutable")
         }
+    }
+
+    private fun notFoundTileResponse(): WebResourceResponse =
+        WebResourceResponse(
+            "text/plain",
+            null,
+            404,
+            "Not Found",
+            emptyMap(),
+            ByteArray(0).inputStream(),
+        )
     }
 
     override fun onPageFinished(
