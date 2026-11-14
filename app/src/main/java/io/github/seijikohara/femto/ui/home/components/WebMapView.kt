@@ -1053,11 +1053,13 @@ internal class MapResourceCache(
                         }
                     }
 
-                    override fun read(): Int =
-                        super.read().also { if (it == -1) releasePermit() }
+                    override fun read(): Int = super.read().also { if (it == -1) releasePermit() }
 
-                    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
-                        super.read(buffer, offset, length).also { if (it == -1) releasePermit() }
+                    override fun read(
+                        buffer: ByteArray,
+                        offset: Int,
+                        length: Int,
+                    ): Int = super.read(buffer, offset, length).also { if (it == -1) releasePermit() }
 
                     override fun close() {
                         try {
