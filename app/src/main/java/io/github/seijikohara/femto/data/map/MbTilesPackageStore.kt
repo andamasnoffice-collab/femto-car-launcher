@@ -89,6 +89,59 @@ internal class MbTilesPackageStore(
         File(packageDirectory, "$safeId.$FILE_EXTENSION").delete()
     }
 
+    /**
+     * Reads one tile using MapLibre's XYZ coordinates. Standard MBTiles
+     * packages store rows in TMS order, so the Y coordinate is flipped.
+     * A database handle is scoped to one request: WebView tile requests may
+     * run concurrently and no SQLite connection is shared across threads.
+     */
+    suspend fun readTile(
+        id: String,
+        zoom: Int,
+        x: Int,
+        y: Int,
+    ): MbTilesTile? = withContext(Dispatchers.IO) {
+        val safeId = runCatching { UUID.fromString(id).toString() }.getOrNull()
+            ?: return@withContext null
+        if (zoom !in 0..30) return@withContext null
+        val tileCountAtZoom = 1L shl zoom
+        if (x < 0 || x.toLong() >= tileCountAtZoom || y < 0 || y.toLong() >= tileCountAtZoom) {
+            return@withContext null
+        }
+        val file = File(packageDirectory, "$safeId.$FILE_EXTENSION")
+        if (!file.isFile) return@withContext null
+        SQLiteDatabase.openDatabase(
+            file.absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS,
+        ).use { database ->
+            val metadata = database.rawQuery("SELECT value FROM metadata WHERE name = 'scheme'", null).use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0)?.lowercase() else null
+            }
+            val row = if (metadata == "xyz") y else tileCountAtZoom.toInt() - 1 - y
+            database.rawQuery(
+                "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ? LIMIT 1",
+                arrayOf(zoom.toString(), x.toString(), row.toString()),
+            ).use { cursor ->
+                if (!cursor.moveToFirst() || cursor.isNull(0)) return@withContext null
+                val bytes = cursor.getBlob(0)
+                if (bytes.isEmpty()) return@withContext null
+                val format = database.rawQuery("SELECT value FROM metadata WHERE name = 'format'", null).use { meta ->
+                    if (meta.moveToFirst()) meta.getString(0)?.lowercase() else null
+                }
+                MbTilesTile(bytes, format?.let(::tileMimeType) ?: "application/octet-stream")
+            }
+        }
+    }
+
+    private fun tileMimeType(format: String): String = when (format) {
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "pbf", "mvt" -> "application/x-protobuf"
+        else -> "application/octet-stream"
+    }
+
     private fun readAndValidate(
         file: File,
         fallbackName: String,
@@ -197,4 +250,10 @@ internal data class MbTilesPackage(
     val tileCount: Long,
     val fileSizeBytes: Long,
     val scheme: String,
+)
+
+/** A single MBTiles tile payload and its declared media type. */
+internal data class MbTilesTile(
+    val bytes: ByteArray,
+    val contentType: String,
 )
