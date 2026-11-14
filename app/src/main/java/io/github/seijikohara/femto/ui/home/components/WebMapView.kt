@@ -244,14 +244,6 @@ internal fun WebMapView(
     // re-allocated on every recomposition (one per location fix).
     val tileHosts =
         remember(effectiveTileHostOverride) { mapTileHosts(effectiveTileHostOverride, BuildConfig.MAP_TILE_HOST) }
-    // Only OpenFreeMap's public tile host has an explicit offline-use allowance.
-    // Custom tile hosts and the Google Maps backend keep their normal WebView policy.
-    val activeTileHost = tileHostAt(tileHosts, tileHostRotation.intValue)
-    val offlineMapCacheEnabled =
-        mapConfig.backend == MapBackend.OSM &&
-            runCatching { URI(activeTileHost).host == OPENFREEMAP_TILE_HOST }.getOrDefault(false)
-    val mapResourceHosts = if (offlineMapCacheEnabled) setOf(OPENFREEMAP_TILE_HOST) else emptySet()
-
     // Renderer-death containment state (see the KDoc): bumping the generation
     // rebuilds the WebView after the renderer process dies; once deaths repeat
     // inside the window the panel gives up and shows a static notice instead of
@@ -315,6 +307,14 @@ internal fun WebMapView(
     // otherwise the page keeps the host it loaded with and the rotation never
     // reaches the next one.
     val tileHostRotation = remember(tileHosts) { mutableIntStateOf(0) }
+    // Only OpenFreeMap's public tile host has an explicit offline-use allowance.
+    // Custom tile hosts and the Google Maps backend keep their normal WebView policy.
+    val activeTileHost = tileHostAt(tileHosts, tileHostRotation.intValue)
+    val offlineMapCacheEnabled =
+        mapConfig.backend == MapBackend.OSM &&
+            runCatching { URI(activeTileHost).host == OPENFREEMAP_TILE_HOST }.getOrDefault(false)
+    val mapResourceHosts = if (offlineMapCacheEnabled) setOf(OPENFREEMAP_TILE_HOST) else emptySet()
+
     // An offline->online edge asks the reload effect for one reload, which
     // waits while the launcher is hidden. A drop back offline withdraws it: a
     // reload then would only fail.
@@ -574,6 +574,8 @@ internal fun WebMapView(
         remember(
             rendererGeneration,
             reloadGeneration,
+            online,
+            offlineMapCacheEnabled,
             mapConfig.backend,
             effectiveGoogleKey,
             effectiveGoogleMapId,
