@@ -26,6 +26,7 @@ import io.github.seijikohara.femto.data.location.LocationPreferences
 import io.github.seijikohara.femto.data.location.LocationSettingsStore
 import io.github.seijikohara.femto.data.location.VehicleMotion
 import io.github.seijikohara.femto.data.location.currentOrUnknown
+import io.github.seijikohara.femto.data.map.MbTilesPackageStore
 import io.github.seijikohara.femto.data.update.UpdatePreferences
 import io.github.seijikohara.femto.data.update.UpdateRepository
 import io.github.seijikohara.femto.data.update.UpdateSettingsStore
@@ -61,6 +62,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "SettingsViewModel"
+
+private data class SettingsOfflineMapUiState(
+    val packages: List<io.github.seijikohara.femto.data.map.MbTilesPackage> = emptyList(),
+    val activeId: String? = null,
+    val busy: Boolean = false,
+    val error: String? = null,
+)
 
 /**
  * Narrow port for the track-log actions Settings drives. The factory binds it
@@ -119,6 +127,7 @@ internal class SettingsViewModel(
     // The video grants cross into the document's provider, a Binder call that
     // can block; tests pass their own dispatcher.
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val mbTilesStore: MbTilesPackageStore? = null,
 ) : ViewModel() {
     // VM-local export progress folded into the derived UiState below; every
     // other UiState field mirrors a persisted store, the updater's state aside.
@@ -134,6 +143,29 @@ internal class SettingsViewModel(
     // could not be kept, if any; shown only while the record it was refused
     // against stands (a pick on the dashboard moves it).
     private val videoPickRefusal = MutableStateFlow<VideoPickRefusal?>(null)
+    private val offlineMapUi = MutableStateFlow(SettingsOfflineMapUiState())
+
+    init {
+        refreshOfflineMaps()
+    }
+
+    private fun refreshOfflineMaps() {
+        viewModelScope.launch {
+            val store = mbTilesStore ?: return@launch
+            offlineMapUi.value = offlineMapUi.value.copy(busy = true, error = null)
+            runCatching { store.listPackages() }
+                .onSuccess { packages ->
+                    offlineMapUi.value =
+                        SettingsOfflineMapUiState(
+                            packages = packages,
+                            activeId = store.activePackageId(),
+                        )
+                }
+                .onFailure { error ->
+                    offlineMapUi.value = offlineMapUi.value.copy(busy = false, error = error.message)
+                }
+        }
+    }
 
     private val storeState: Flow<SettingsUiState> =
         combine(
@@ -289,7 +321,7 @@ internal class SettingsViewModel(
 
     // Folded in here rather than into the store combine above, which already holds
     // kotlinx's five-flow typed overload.
-    val uiState: StateFlow<SettingsUiState> =
+    private val baseUiState: Flow<SettingsUiState> =
         combine(
             storeState,
             trackExportState,
@@ -298,12 +330,51 @@ internal class SettingsViewModel(
             video,
         ) { state, export, statusVisible, update, videoRows ->
             state.copy(trackExport = export, dockStatusVisible = statusVisible, updates = update, video = videoRows)
+        }
+
+    val uiState: StateFlow<SettingsUiState> =
+        combine(baseUiState, offlineMapUi) { state, offlineMaps ->
+            state.copy(
+                offlineMapPackages = offlineMaps.packages,
+                activeOfflineMapId = offlineMaps.activeId,
+                offlineMapBusy = offlineMaps.busy,
+                offlineMapError = offlineMaps.error,
+            )
         }.stateIn(viewModelScope, WhileUiSubscribed, SettingsUiState.Initial)
 
     fun onAction(action: SettingsAction) {
         // Each branch is a single suspending write; launch once and dispatch.
         viewModelScope.launch {
             when (action) {
+                SettingsAction.PickOfflineMapPackage -> Unit
+
+                is SettingsAction.ImportOfflineMapPackage -> {
+                    val store = mbTilesStore
+                    if (store != null) {
+                        offlineMapUi.value = offlineMapUi.value.copy(busy = true, error = null)
+                        runCatching {
+                            store.importPackage(action.uri, action.uri.lastPathSegment ?: "Offline map")
+                        }.onSuccess { imported ->
+                            store.setActivePackage(imported.id)
+                            refreshOfflineMaps()
+                        }.onFailure { error ->
+                            offlineMapUi.value = offlineMapUi.value.copy(busy = false, error = error.message)
+                        }
+                    }
+                }
+
+                is SettingsAction.ActivateOfflineMapPackage -> {
+                    mbTilesStore?.setActivePackage(action.id)
+                    refreshOfflineMaps()
+                }
+
+                is SettingsAction.DeleteOfflineMapPackage -> {
+                    mbTilesStore?.deletePackage(action.id)
+                    refreshOfflineMaps()
+                }
+
+                SettingsAction.RefreshOfflineMapPackages -> refreshOfflineMaps()
+
                 is SettingsAction.SetThemeMode -> {
                     displayPreferences.setThemeMode(action.value)
                 }
@@ -775,6 +846,7 @@ internal class SettingsViewModelFactory(
             motion = locationGraph.vehicleMotion(),
             videoPreferences = VideoPreferences(application),
             videoGrants = ContentResolverVideoSourceGrants(application),
+            mbTilesStore = MbTilesPackageStore(application.contentResolver, application.filesDir),
         ) as T
     }
 

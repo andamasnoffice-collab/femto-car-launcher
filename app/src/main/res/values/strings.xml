@@ -403,6 +403,15 @@
     <string name="settings_map_tile_host_hint">Optional. The origin that serves the map\'s tiles, styles, sprites and glyphs in the OpenFreeMap layout, for example https://tiles.example.org — the https:// scheme is required. Every request the default host would receive goes to this one instead; if it cannot be reached, the map returns to the default host on its next retry.</string>
     <string name="settings_map_tile_host_save">Save</string>
     <string name="settings_map_tile_host_clear">Use default</string>
+    <string name="settings_offline_maps_title">Offline maps</string>
+    <string name="settings_offline_maps_import">Import MBTiles package</string>
+    <string name="settings_offline_maps_import_hint">Choose a raster MBTiles file. The package is copied into private app storage and checked before use.</string>
+    <string name="settings_offline_maps_package_summary">%1$s · %2$d tiles · %3$d MB</string>
+    <string name="settings_offline_maps_delete">Delete package</string>
+    <string name="settings_offline_maps_working">Processing offline map…</string>
+    <string name="settings_offline_maps_error">Offline map error: %1$s</string>
+    <string name="settings_offline_maps_inactive">No offline package is active. The online map provider will be used.</string>
+    <string name="settings_offline_maps_active">Offline map active. Tap its package again to return to the online map.</string>
     <string name="settings_map_backend">Map provider</string>
     <string name="settings_map_backend_osm">OpenStreetMap</string>
     <string name="settings_map_accent_osm_only_note">Accent recolor applies to OpenStreetMap only</string>

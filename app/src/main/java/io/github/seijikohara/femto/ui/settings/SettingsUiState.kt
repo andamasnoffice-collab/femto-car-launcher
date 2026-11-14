@@ -26,6 +26,7 @@ import io.github.seijikohara.femto.data.location.LocationQualitySetting
 import io.github.seijikohara.femto.data.location.LocationSettings
 import io.github.seijikohara.femto.data.location.TrackRetentionSetting
 import io.github.seijikohara.femto.data.location.TripAutoResetSetting
+import io.github.seijikohara.femto.data.map.MbTilesPackage
 import io.github.seijikohara.femto.data.video.VideoSettings
 
 /** State for the in-app settings screen: the persisted display + font choices. */
@@ -102,6 +103,10 @@ internal data class SettingsUiState(
     val googleMapsTraffic: Boolean = DisplaySettings.Default.googleMapsTraffic,
     val mapTileHost: String = DisplaySettings.Default.mapTileHost,
     val mapCustomStyleUrl: String = DisplaySettings.Default.mapCustomStyleUrl,
+    val offlineMapPackages: List<MbTilesPackage> = emptyList(),
+    val activeOfflineMapId: String? = null,
+    val offlineMapBusy: Boolean = false,
+    val offlineMapError: String? = null,
     val availableCalendars: List<CalendarInfo> = emptyList(),
     val hiddenCalendarIds: Set<Long> = emptySet(),
     // Defaults false so a not-yet-loaded selector never falsely claims "no
@@ -215,6 +220,22 @@ internal sealed interface VideoFileSummary {
 
 /** Persisted-preference changes the settings screen reports up. */
 internal sealed interface SettingsAction {
+    data object PickOfflineMapPackage : SettingsAction
+
+    data class ImportOfflineMapPackage(
+        val uri: Uri,
+    ) : SettingsAction
+
+    data class ActivateOfflineMapPackage(
+        val id: String?,
+    ) : SettingsAction
+
+    data class DeleteOfflineMapPackage(
+        val id: String,
+    ) : SettingsAction
+
+    data object RefreshOfflineMapPackages : SettingsAction
+
     data class SetThemeMode(
         val value: ThemeMode,
     ) : SettingsAction
