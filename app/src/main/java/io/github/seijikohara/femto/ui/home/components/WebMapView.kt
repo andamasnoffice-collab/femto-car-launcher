@@ -695,7 +695,7 @@ internal fun WebMapView(
                         fun initialStyleUrl(): String = currentStyleUrl
 
                         @JavascriptInterface
-                        fun offlineMbtilesId(): String = if (offlineMbTilesEnabled) activeMbTilesId else ""
+                        fun offlineMbtilesId(): String = if (offlineMbTilesEnabled) activeMbTilesId.orEmpty() else ""
 
                         @JavascriptInterface
                         fun offlineMbtilesAttribution(): String = activeMbTilesInfo?.attribution.orEmpty()
