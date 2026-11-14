@@ -14,8 +14,8 @@ import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.WebView
 import android.webkit.WebSettings
+import android.webkit.WebView
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -1075,7 +1075,7 @@ internal class MapResourceCache(context: Context) {
                 responseHeaders,
                 responseStream,
             )
-        } catch (error: IOException) {
+        } catch (error: Exception) {
             Log.d(TAG, "Map resource cache request failed: ${error.message}")
             return null
         } finally {
