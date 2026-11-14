@@ -16,6 +16,16 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import java.io.File
+import java.io.FilterInputStream
+import java.io.IOException
+import java.net.URI
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import okhttp3.Cache
+import okhttp3.CacheControl
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -152,6 +162,10 @@ internal fun WebMapView(
     attributionBottomInset: Dp = 0.dp,
 ) {
     val context = LocalContext.current
+    // Share one persistent disk cache across WebView rebuilds and connectivity changes.
+    val mapResourceCache = remember(context.applicationContext) {
+        MapResourceCache(context.applicationContext)
+    }
     // The bridge object below is registered once per WebView instance and would
     // otherwise capture the first composition's lambdas forever.
     val currentOnFollowChange by rememberUpdatedState(onFollowChange)
@@ -595,6 +609,9 @@ internal fun WebMapView(
                     LiveMapWebViewClient(
                         context = context,
                         assetLoader = assetLoader,
+                        mapResourceCache = mapResourceCache,
+                        mapResourceHosts = mapResourceHosts(tileHosts, BuildConfig.MAP_TERRAIN_TILEJSON_URL),
+                        online = online,
                         onPageLoaded = { pageReady.value = true },
                         onRendererDeath = { view, crashed ->
                             val description = if (crashed) "renderer crashed" else "renderer killed by the system"
@@ -952,6 +969,136 @@ internal fun WebMapView(
     }
 }
 
+
+/**
+ * Bounded persistent HTTP cache for map resources requested by the visible map.
+ * No area enumeration or prefetching is performed. HTTP cache headers are
+ * honoured online; cache-only reads are used offline so stale viewed resources
+ * can still render. The 50 MB cache and four in-flight requests match the
+ * public OpenFreeMap offline-download limits.
+ */
+internal class MapResourceCache(context: Context) {
+    private val permits = Semaphore(MAX_PARALLEL_REQUESTS)
+    private val client =
+        OkHttpClient
+            .Builder()
+            .cache(Cache(File(context.cacheDir, CACHE_DIRECTORY), MAX_CACHE_BYTES))
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
+
+    fun intercept(
+        request: WebResourceRequest,
+        allowedHosts: Set<String>,
+        online: Boolean,
+    ): WebResourceResponse? {
+        if (request.method != "GET" || request.url.scheme != "https") return null
+        if (request.url.host.lowercase() !in allowedHosts) return null
+        try {
+            permits.acquire()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return null
+        }
+
+        var responseToClose: okhttp3.Response? = null
+        var permitTransferredToStream = false
+        try {
+            val builder =
+                Request
+                    .Builder()
+                    .url(request.url.toString())
+                    .get()
+            request.requestHeaders.forEach { (name, value) ->
+                if (name.lowercase() in FORWARDED_REQUEST_HEADERS) {
+                    builder.header(name, value)
+                }
+            }
+            if (!online) builder.cacheControl(CacheControl.FORCE_CACHE)
+
+            val response = client.newCall(builder.build()).execute()
+            responseToClose = response
+            val body = response.body
+            // 504 is OkHttp's cache-only miss. Let WebView try its own persistent
+            // HTTP cache (V1) under LOAD_CACHE_ELSE_NETWORK before giving up.
+            if (response.code == 504 || body == null) return null
+
+            val contentType = body.contentType()
+            val mimeType =
+                contentType?.let { "${it.type}/${it.subtype}" }
+                    ?: "application/octet-stream"
+            val charset = contentType?.charset(Charsets.UTF_8)?.name()
+            val responseHeaders =
+                response.headers
+                    .names()
+                    .filterNot { it.lowercase() in HOP_BY_HOP_RESPONSE_HEADERS }
+                    .associateWith { name -> response.headers.values(name).joinToString(", ") }
+            val responseStream =
+                object : FilterInputStream(body.byteStream()) {
+                    private var closed = false
+
+                    override fun close() {
+                        if (closed) return
+                        closed = true
+                        try {
+                            super.close()
+                        } finally {
+                            response.close()
+                            permits.release()
+                        }
+                    }
+                }
+            permitTransferredToStream = true
+            return WebResourceResponse(
+                mimeType,
+                charset,
+                response.code,
+                response.message.ifBlank { "OK" },
+                responseHeaders,
+                responseStream,
+            )
+        } catch (error: IOException) {
+            Log.d(TAG, "Map resource cache request failed: ${error.message}")
+            return null
+        } finally {
+            if (!permitTransferredToStream) {
+                responseToClose?.close()
+                permits.release()
+            }
+        }
+    }
+
+    private companion object {
+        const val CACHE_DIRECTORY = "map-resource-http-cache"
+        const val MAX_CACHE_BYTES = 50L * 1024L * 1024L
+        const val MAX_PARALLEL_REQUESTS = 4
+        const val CONNECT_TIMEOUT_SECONDS = 8L
+        const val READ_TIMEOUT_SECONDS = 15L
+        val FORWARDED_REQUEST_HEADERS =
+            setOf("accept", "accept-language", "origin", "referer", "user-agent")
+        val HOP_BY_HOP_RESPONSE_HEADERS =
+            setOf(
+                "connection",
+                "keep-alive",
+                "proxy-authenticate",
+                "proxy-authorization",
+                "te",
+                "trailers",
+                "transfer-encoding",
+                "upgrade",
+                "content-length",
+                "content-encoding",
+            )
+    }
+}
+
+internal fun mapResourceHosts(tileHosts: List<String>, terrainTileJsonUrl: String): Set<String> =
+    buildSet {
+        (tileHosts + terrainTileJsonUrl).forEach { value ->
+            runCatching { URI(value).host?.lowercase() }.getOrNull()?.let(::add)
+        }
+    }
+
 // The live map page's WebView client. [onPageLoaded] runs once the page script
 // has run (module scripts execute before the load event, so the bridge
 // functions are registered by then); [onRendererDeath] receives a renderer
@@ -959,6 +1106,9 @@ internal fun WebMapView(
 internal class LiveMapWebViewClient(
     private val context: Context,
     private val assetLoader: WebViewAssetLoader,
+    private val mapResourceCache: MapResourceCache,
+    private val mapResourceHosts: Set<String>,
+    private val online: Boolean,
     private val onPageLoaded: () -> Unit,
     private val onRendererDeath: (view: WebView, crashed: Boolean) -> Unit,
 ) : WebViewClientCompat() {
@@ -986,7 +1136,9 @@ internal class LiveMapWebViewClient(
     override fun shouldInterceptRequest(
         view: WebView,
         request: WebResourceRequest,
-    ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+    ): WebResourceResponse? =
+        assetLoader.shouldInterceptRequest(request.url)
+            ?: mapResourceCache.intercept(request, mapResourceHosts, online)
 
     override fun onPageFinished(
         view: WebView,
