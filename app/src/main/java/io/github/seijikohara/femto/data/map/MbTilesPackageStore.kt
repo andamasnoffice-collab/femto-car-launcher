@@ -231,6 +231,9 @@ internal class MbTilesPackageStore(
         require(format in SUPPORTED_FORMATS) {
             "Unsupported MBTiles format: ${format.ifBlank { "unknown" }}."
         }
+        require(format in RASTER_FORMATS) {
+            "Only raster MBTiles packages (PNG, JPEG or WebP) can be activated in this version."
+        }
         val tileCount = database.rawQuery("SELECT COUNT(*) FROM tiles", null).use { cursor ->
             require(cursor.moveToFirst())
             cursor.getLong(0)
